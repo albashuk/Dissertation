@@ -1,6 +1,7 @@
 package oleksii.bashuk.hash.signs.signature;
 
 
+import oleksii.bashuk.hash.signs.hash.HashFunction.Hash;
 import org.apache.commons.lang3.tuple.Pair;
 
 public interface Signature {
@@ -11,7 +12,9 @@ public interface Signature {
     boolean vrfy(PubKey pk, Sign sign, Message msg);
 
     interface SecKey {}
-    interface PubKey {}
+    interface PubKey {
+        Hash hash = null;
+    }
     interface Sign {}
     interface Message {}
 }

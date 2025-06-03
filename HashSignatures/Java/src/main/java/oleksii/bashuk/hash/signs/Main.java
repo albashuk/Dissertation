@@ -1,17 +1,21 @@
 package oleksii.bashuk.hash.signs;
 
+import oleksii.bashuk.hash.signs.common.HashMessage;
 import oleksii.bashuk.hash.signs.hash.HashFunction.*;
 import oleksii.bashuk.hash.signs.hash.MyHashFunction;
 import oleksii.bashuk.hash.signs.hash.MyHashFunction.*;
 import oleksii.bashuk.hash.signs.measure.GWOTSMeasures;
 import oleksii.bashuk.hash.signs.realisation.gwots.Simulation;
 import oleksii.bashuk.hash.signs.signature.Signature.*;
+import oleksii.bashuk.hash.signs.signature.ots.Lamport;
+import oleksii.bashuk.hash.signs.signature.ots.Lamport.*;
 import oleksii.bashuk.hash.signs.signature.wots.BlockWOTS;
 import oleksii.bashuk.hash.signs.signature.wots.BlockWOTS.*;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Random;
 
 public class Main {
     public static void main(String[] args) {
@@ -19,7 +23,8 @@ public class Main {
 //        debugWOTSBlock();
 //        debugGWOTSSimulation();
 //        debugGWOTSPlusSimulation();
-        measureGWOTS();
+        debugLamport();
+//        measureGWOTS();
     }
 
     private static void debugMyHash() {
@@ -108,6 +113,37 @@ public class Main {
         }
 
         Simulation.runPlus(myHashFunction, 9, 3, 5, true);
+    }
+
+    private static void debugLamport() {
+        int seedKey = 123;
+
+        MyHashFunction myHashFunction;
+        try {
+            myHashFunction = new MyHashFunction("SHA-512");
+        } catch (Exception ex) {
+            System.out.println("Wrong hash function name");
+            return;
+        }
+
+        Lamport lamport = new Lamport(myHashFunction, seedKey);
+
+        Pair<SecKey, PubKey> key = lamport.gen();
+        LamportSecKey sk = (LamportSecKey) key.getLeft();
+        LamportPubKey pk = (LamportPubKey) key.getRight();
+
+        long seed = seedKey + System.currentTimeMillis();
+        Random random = new Random(seed);
+        byte[] randomValue = new byte[32];
+        random.nextBytes(randomValue);
+        HashMessage msg = new HashMessage(myHashFunction.hash(randomValue));
+
+        LamportSign sign = (LamportSign) lamport.sign(sk, msg);
+
+//        random.nextBytes(randomValue);
+//        msg = new LamportMessage(myHashFunction.hash(randomValue));
+
+        System.out.println("Result: " + lamport.vrfy(pk, sign, msg));
     }
 
     private static void measureGWOTS() {
