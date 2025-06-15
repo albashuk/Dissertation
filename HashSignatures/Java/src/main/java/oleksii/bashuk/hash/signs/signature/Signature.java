@@ -13,7 +13,7 @@ public interface Signature {
 
     interface SecKey {}
     interface PubKey {
-        Hash hash = null;
+        Hash getHash();
     }
     interface Sign {}
     interface Message {}

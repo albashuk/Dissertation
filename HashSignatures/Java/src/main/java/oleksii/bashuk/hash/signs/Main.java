@@ -7,6 +7,8 @@ import oleksii.bashuk.hash.signs.hash.MyHashFunction.*;
 import oleksii.bashuk.hash.signs.measure.GWOTSMeasures;
 import oleksii.bashuk.hash.signs.realisation.gwots.Simulation;
 import oleksii.bashuk.hash.signs.signature.Signature.*;
+import oleksii.bashuk.hash.signs.signature.mts.NarySTBS;
+import oleksii.bashuk.hash.signs.signature.mts.NarySTBS.*;
 import oleksii.bashuk.hash.signs.signature.ots.Lamport;
 import oleksii.bashuk.hash.signs.signature.ots.Lamport.*;
 import oleksii.bashuk.hash.signs.signature.wots.BlockWOTS;
@@ -23,7 +25,8 @@ public class Main {
 //        debugWOTSBlock();
 //        debugGWOTSSimulation();
 //        debugGWOTSPlusSimulation();
-        debugLamport();
+//        debugLamport();
+        debugNarySTBS();
 //        measureGWOTS();
     }
 
@@ -144,6 +147,48 @@ public class Main {
 //        msg = new LamportMessage(myHashFunction.hash(randomValue));
 
         System.out.println("Result: " + lamport.vrfy(pk, sign, msg));
+    }
+
+    private static void debugNarySTBS() {
+        int seedKey = 123;
+        int arity = 4;
+        boolean useProxy = false;
+        int iterations = 24;
+
+        MyHashFunction myHashFunction;
+        try {
+            myHashFunction = new MyHashFunction("SHA-512");
+        } catch (Exception ex) {
+            System.out.println("Wrong hash function name");
+            return;
+        }
+
+        Lamport lamport = new Lamport(myHashFunction, seedKey);
+        NarySTBS narySTBS = new NarySTBS(myHashFunction, lamport, arity, useProxy);
+
+        Pair<SecKey, PubKey> key = narySTBS.gen();
+        NarySTBSSecKey sk = (NarySTBSSecKey) key.getLeft();
+        NarySTBSPubKey pk = (NarySTBSPubKey) key.getRight();
+
+        long seed = seedKey + System.currentTimeMillis();
+        Random random = new Random(seed);
+        byte[] randomValue = new byte[32];
+
+        HashMessage msg = null;
+        NarySTBSSign sign = null;
+        for (int i = 0; i < iterations; i++) {
+            random.nextBytes(randomValue);
+            msg = new HashMessage(myHashFunction.hash(randomValue));
+            sign = (NarySTBSSign) narySTBS.sign(sk, msg);
+            System.out.println("Result " + (i + 1) + ": " + narySTBS.vrfy(pk, sign, msg) + " " + sign.chainNodes().size());
+        }
+
+//        NarySTBSSign sign = (NarySTBSSign) narySTBS.sign(sk, msg);
+
+        random.nextBytes(randomValue);
+        msg = new HashMessage(myHashFunction.hash(randomValue));
+
+        System.out.println("Corrupted result: " + narySTBS.vrfy(pk, sign, msg));
     }
 
     private static void measureGWOTS() {

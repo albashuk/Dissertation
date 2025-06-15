@@ -47,12 +47,14 @@ public class NarySTBS implements Signature {
     }
 
     public NarySTBSSign _sign(NarySTBSSecKey sk, HashMessage msg) {
+        // Generate child nodes for next node for sign
         Node curNode = sk.nextForSign;
         for (int i = 0; i < arity; i++) {
             Pair<SecKey, PubKey> keyPair = ots.gen();
             curNode.children.add(new Node(curNode, keyPair.getLeft(), keyPair.getRight()));
         }
 
+        // Connect newly generated nodes
         curNode.children.get(0).previous = sk.last;
         sk.last.next = curNode.children.get(0);
         sk.last = curNode.children.get(arity - 1);
@@ -61,32 +63,55 @@ public class NarySTBS implements Signature {
             curNode.children.get(i - 1).next = curNode.children.get(i);
         }
 
+        // Generate proxy node if needed, and sign the msg by the proxy node
         if (useProxyNode) {
             Pair<SecKey, PubKey> keyPair = ots.gen();
             curNode.children.add(new Node(curNode, keyPair.getLeft(), keyPair.getRight()));
-        }
-
-        Hash hash = hashFunction.hash(new byte[0], 0);
-        for (Node child: curNode.children) {
-            hash.concat(child.pk.hash);
-        }
-
-        if (useProxyNode) {
+            curNode.children.get(arity).msg = msg;
             curNode.children.get(arity).sign = ots.sign(curNode.children.get(arity).sk, new HashMessage(msg.value()));
         } else {
-            hash.concat(msg.value());
+            // Otherwise, just add msg to the node
+            curNode.msg = msg;
         }
-        curNode.msg = msg;
+
+        // Create common hash of child nodes (their pub keys)
+        Hash hash = prepareHashForSign(curNode);
+
         curNode.sign = ots.sign(curNode.sk, new HashMessage(hash));
 
+        // Creating signature chain
         NarySTBSSign sign = new NarySTBSSign(new ArrayList<Node>());
+        Node lastCurNode = null;
+        Node lastSignNode = null;
         while (curNode != null) {
-            Node pkNode = new Node();
-            pkNode.sign =
-            new ArrayList<Node>();
+            Node signNode = new Node();
+            signNode.sign = curNode.sign;
+            signNode.pk = curNode.pk;
+            if (!useProxyNode) {
+                signNode.msg = curNode.msg;
+            }
+            signNode.children = new ArrayList<Node>();
+            for (Node child: curNode.children) {
+                if (child == lastCurNode) {
+                    lastSignNode.parent = signNode;
+                    signNode.children.add(lastSignNode);
+                } else {
+                    Node signChild = new Node(signNode, null, child.pk);
+                    if (useProxyNode && curNode == sk.nextForSign && child.previous == null) {
+                        signChild.sign = child.sign;
+                        signChild.msg = child.msg;
+                    }
+                    signNode.children.add(signChild);
+                }
+            }
+            sign.chainNodes.add(signNode);
+            lastCurNode = curNode;
+            lastSignNode = signNode;
+            curNode = curNode.parent;
         }
 
-        sk.nextForSign = curNode.next;
+        sk.nextForSign = sk.nextForSign.next;
+        return sign;
     }
 
     public boolean vrfy(PubKey pk, Sign sign, Message msg) {
@@ -94,7 +119,60 @@ public class NarySTBS implements Signature {
     }
 
     public boolean _vrfy(NarySTBSPubKey pk, NarySTBSSign sign, HashMessage msg) {
+        Node curNode = sign.chainNodes().get(0);
+        if (!msg.value().equals(useProxyNode ? curNode.children.get(arity).msg.value() : curNode.msg.value())) {
+            return false;
+        }
+        sign.chainNodes.get(sign.chainNodes.size() - 1).pk = pk.headPk;
 
+        if (useProxyNode) {
+            Node proxyNode = curNode.children.get(arity);
+            if (!ots.vrfy(proxyNode.pk, proxyNode.sign, proxyNode.msg)) {
+                sign.chainNodes.get(sign.chainNodes.size() - 1).pk = null;
+                return false;
+            }
+        }
+
+        Node lastNode = curNode.children.get(0);
+        while (curNode != null) {
+            boolean lastNodeIsChild = false;
+            for (Node child: curNode.children) {
+                if (child == lastNode) {
+                    lastNodeIsChild = true;
+                    break;
+                }
+            }
+            if (!lastNodeIsChild) {
+                sign.chainNodes.get(sign.chainNodes.size() - 1).pk = null;
+                return false;
+            }
+
+            Hash hash = prepareHashForSign(curNode);
+            if (!ots.vrfy(curNode.pk, curNode.sign, new HashMessage(hash))) {
+                sign.chainNodes.get(sign.chainNodes.size() - 1).pk = null;
+                return false;
+            }
+
+            lastNode = curNode;
+            curNode = curNode.parent;
+        }
+
+        sign.chainNodes.get(sign.chainNodes.size() - 1).pk = null;
+        return true;
+    }
+
+    private Hash prepareHashForSign(Node node) {
+        // Create common hash of child nodes (their pub keys)
+        Hash hash = hashFunction.hash(new byte[0], 0);
+        for (Node child: node.children) {
+            hash.concat(child.pk.getHash());
+        }
+
+        if (!useProxyNode) {
+            // Otherwise, concat common hash with the msg hash
+            hash.concat(node.msg.value());
+        }
+        return hash;
     }
 
     public static class NarySTBSSecKey implements SecKey {
@@ -109,7 +187,11 @@ public class NarySTBS implements Signature {
         }
     }
 
-    public record NarySTBSPubKey(PubKey pk) implements PubKey {}
+    public record NarySTBSPubKey(PubKey headPk) implements PubKey {
+        public Hash getHash() {
+            return headPk.getHash();
+        }
+    }
 
     public record NarySTBSSign(List<Node> chainNodes) implements Sign {}
 
@@ -121,7 +203,7 @@ public class NarySTBS implements Signature {
         public SecKey sk;
         public PubKey pk;
         public Sign sign;
-        public Message msg;
+        public HashMessage msg;
 
         public Node() {
             this(null, null, null, null, null, null, null, null);
@@ -133,7 +215,7 @@ public class NarySTBS implements Signature {
         }
 
         public Node(Node parent, Node previous, Node next, List<Node> children,
-             SecKey sk, PubKey pk, Sign sign, Message msg) {
+             SecKey sk, PubKey pk, Sign sign, HashMessage msg) {
             this.parent = parent;
             this.previous = previous;
             this.next = next;

@@ -64,7 +64,11 @@ public class BlockWOTS implements Signature {
 
     public record BlockWOTSSecKey(Hash value) implements SecKey {}
 
-    public record BlockWOTSPubKey(Hash value) implements PubKey {}
+    public record BlockWOTSPubKey(Hash value) implements PubKey {
+        public Hash getHash() {
+            return value;
+        }
+    }
 
     public record BlockWOTSSign(Hash value) implements Sign {}
 

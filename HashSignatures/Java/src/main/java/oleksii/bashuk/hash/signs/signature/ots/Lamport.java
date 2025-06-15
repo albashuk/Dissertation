@@ -91,7 +91,11 @@ public class Lamport implements Signature {
 
     public record LamportSecKey(List<Pair<Hash, Hash>> values) implements SecKey {}
 
-    public record LamportPubKey(List<Pair<Hash, Hash>> values, Hash hash) implements PubKey {}
+    public record LamportPubKey(List<Pair<Hash, Hash>> values, Hash hash) implements PubKey {
+        public Hash getHash() {
+            return hash;
+        }
+    }
 
     public record LamportSign(List<Hash> values) implements Sign {}
 }
