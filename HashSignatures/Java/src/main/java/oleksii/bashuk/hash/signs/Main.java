@@ -27,7 +27,8 @@ public class Main {
 //        debugGWOTSSimulation();
 //        debugGWOTSPlusSimulation();
 //        debugLamport();
-        debugNarySTBS();
+//        debugNarySTBS();
+        measureNarySTBS();
 //        measureGWOTS();
     }
 
@@ -211,6 +212,58 @@ public class Main {
         if (measures != null) {
             measures.saveToFile("gwots_plus");
         }
+    }
+
+    private static void measureNarySTBS() {
+        int seedKey = 123;
+        int arity = 2;
+        boolean useProxy = false;
+        int iterations = 100000;
+        long deadline = (long) (2 * 60 * 60 * 1e9);
+
+        MyHashFunction myHashFunction;
+        try {
+            myHashFunction = new MyHashFunction("SHA-512");
+        } catch (Exception ex) {
+            System.out.println("Wrong hash function name");
+            return;
+        }
+
+        Lamport lamport = new Lamport(myHashFunction, seedKey);
+        NarySTBS narySTBS = new NarySTBS(myHashFunction, lamport, arity, useProxy, true);
+
+        Pair<SecKey, PubKey> key = narySTBS.gen();
+        NarySTBSSecKey sk = (NarySTBSSecKey) key.getLeft();
+        NarySTBSPubKey pk = (NarySTBSPubKey) key.getRight();
+
+        long seed = seedKey + System.currentTimeMillis();
+        Random random = new Random(seed);
+        byte[] randomValue = new byte[32];
+
+        HashMessage msg = null;
+        NarySTBSSign sign = null;
+        long begin = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            random.nextBytes(randomValue);
+            msg = new HashMessage(myHashFunction.hash(randomValue));
+            sign = (NarySTBSSign) narySTBS.sign(sk, msg);
+            boolean r = narySTBS.vrfy(pk, sign, msg);
+            if ((i + 1) % (iterations / 1000) == 0) {
+                long t = System.nanoTime() - begin;
+                long h = t / (((long) (1e9)) * 60 * 60);
+                long m = t / (((long) (1e9)) * 60) - h * 60;
+                long s = t / (((long) (1e9))) - h * 60 * 60 - m * 60;
+                System.out.println("Processed  " + ((i + 1) / (iterations / 100.0)) + "%.  " +
+                        "The last vrfy result for  i=" + (i + 1) + ": " + r + ".  " +
+                        "Tree height:  " + sign.chainNodes.size() + ".  " +
+                        "Time from the beginning:  " + h + " h,  " + m + " m,  " + s + "s.");
+            }
+            if (System.nanoTime() - begin > deadline) {
+                break;
+            }
+        }
+
+        narySTBS.getMeasures().saveToFile("narySTBS");
     }
 
     private static byte[] longToBytes(long x) {

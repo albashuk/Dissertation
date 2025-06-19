@@ -1,12 +1,12 @@
 package oleksii.bashuk.hash.signs.signature.mts;
 
+import com.javamex.classmexer.MemoryUtil;
 import oleksii.bashuk.hash.signs.common.HashMessage;
 import oleksii.bashuk.hash.signs.hash.HashFunction;
 import oleksii.bashuk.hash.signs.hash.HashFunction.Hash;
 import oleksii.bashuk.hash.signs.measure.MTSMeasures;
 import oleksii.bashuk.hash.signs.signature.Signature;
 import org.apache.commons.lang3.tuple.Pair;
-import org.openjdk.jol.info.GraphLayout;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -96,7 +96,7 @@ public class NarySTBS implements Signature {
 
         if (measure) {
             measures.addSignCreationTime(System.nanoTime() - timeStamp);
-            measures.addSignSize(GraphLayout.parseInstance(sign).totalSize());
+            measures.addSignSize(MemoryUtil.deepMemoryUsageOf(sign));
         }
 
         sk.nextForSign = sk.nextForSign.next;
