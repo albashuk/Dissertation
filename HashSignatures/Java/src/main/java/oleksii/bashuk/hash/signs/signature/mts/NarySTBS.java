@@ -3,8 +3,10 @@ package oleksii.bashuk.hash.signs.signature.mts;
 import oleksii.bashuk.hash.signs.common.HashMessage;
 import oleksii.bashuk.hash.signs.hash.HashFunction;
 import oleksii.bashuk.hash.signs.hash.HashFunction.Hash;
+import oleksii.bashuk.hash.signs.measure.MTSMeasures;
 import oleksii.bashuk.hash.signs.signature.Signature;
 import org.apache.commons.lang3.tuple.Pair;
+import org.openjdk.jol.info.GraphLayout;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,18 +17,50 @@ public class NarySTBS implements Signature {
     private final Signature ots;
     private final int arity;
     private final boolean useProxyNode;
+    private final boolean measure;
+
+    private final MTSMeasures measures;
+
+    private long timeStamp;
 
     public NarySTBS(HashFunction hashFunction,
                     Signature ots,
                     int arity,
                     boolean useProxyNode) {
+        this(hashFunction, ots, arity, useProxyNode, false);
+    }
+
+    public NarySTBS(HashFunction hashFunction,
+                    Signature ots,
+                    int arity,
+                    boolean useProxyNode,
+                    boolean measure) {
         this.hashFunction = hashFunction;
         this.ots = ots;
         this.arity = arity;
         this.useProxyNode = useProxyNode;
+        this.measure = measure;
+        this.measures = new MTSMeasures(hashFunction.getName(), arity, useProxyNode);
+    }
+
+    public MTSMeasures getMeasures() {
+        return measures;
     }
 
     public Pair<SecKey, PubKey> gen() {
+        try {
+            if (measure) {
+                timeStamp = System.nanoTime();
+            }
+            return _gen();
+        } finally {
+            if (measure) {
+                measures.addGenTime(System.nanoTime() - timeStamp);
+            }
+        }
+    }
+
+    public Pair<SecKey, PubKey> _gen() {
         Pair<SecKey, PubKey> keyPair = ots.gen();
         Node head = new Node(null, keyPair.getLeft(), null);
         NarySTBSSecKey sk = new NarySTBSSecKey(head, head, head);
@@ -38,7 +72,7 @@ public class NarySTBS implements Signature {
         return _buildPubKeyFromSecKey((NarySTBSSecKey) sk);
     }
 
-    public NarySTBSPubKey _buildPubKeyFromSecKey(NarySTBSSecKey sk) {
+    private NarySTBSPubKey _buildPubKeyFromSecKey(NarySTBSSecKey sk) {
         return (NarySTBSPubKey) ots.buildPubKeyFromSecKey(sk);
     }
 
@@ -46,7 +80,30 @@ public class NarySTBS implements Signature {
         return _sign((NarySTBSSecKey) sk, (HashMessage) msg);
     }
 
-    public NarySTBSSign _sign(NarySTBSSecKey sk, HashMessage msg) {
+    private NarySTBSSign _sign(NarySTBSSecKey sk, HashMessage msg) {
+        if (measure) {
+            timeStamp = System.nanoTime();
+        }
+
+        signByNextNode(sk, msg);
+
+        if (measure) {
+            measures.addSignTime(System.nanoTime() - timeStamp);
+            timeStamp = System.nanoTime();
+        }
+
+        NarySTBSSign sign = createSignatureChain(sk, sk.nextForSign);
+
+        if (measure) {
+            measures.addSignCreationTime(System.nanoTime() - timeStamp);
+            measures.addSignSize(GraphLayout.parseInstance(sign).totalSize());
+        }
+
+        sk.nextForSign = sk.nextForSign.next;
+        return sign;
+    }
+
+    private void signByNextNode(NarySTBSSecKey sk, HashMessage msg) {
         // Generate child nodes for next node for sign
         Node curNode = sk.nextForSign;
         for (int i = 0; i < arity; i++) {
@@ -68,7 +125,7 @@ public class NarySTBS implements Signature {
             Pair<SecKey, PubKey> keyPair = ots.gen();
             curNode.children.add(new Node(curNode, keyPair.getLeft(), keyPair.getRight()));
             curNode.children.get(arity).msg = msg;
-            curNode.children.get(arity).sign = ots.sign(curNode.children.get(arity).sk, new HashMessage(msg.value()));
+            curNode.children.get(arity).sign = ots.sign(curNode.children.get(arity).sk, new HashMessage(msg.value));
         } else {
             // Otherwise, just add msg to the node
             curNode.msg = msg;
@@ -78,8 +135,10 @@ public class NarySTBS implements Signature {
         Hash hash = prepareHashForSign(curNode);
 
         curNode.sign = ots.sign(curNode.sk, new HashMessage(hash));
+    }
 
-        // Creating signature chain
+    private NarySTBSSign createSignatureChain(NarySTBSSecKey sk, Node startNode) {
+        Node curNode = startNode;
         NarySTBSSign sign = new NarySTBSSign(new ArrayList<Node>());
         Node lastCurNode = null;
         Node lastSignNode = null;
@@ -97,7 +156,7 @@ public class NarySTBS implements Signature {
                     signNode.children.add(lastSignNode);
                 } else {
                     Node signChild = new Node(signNode, null, child.pk);
-                    if (useProxyNode && curNode == sk.nextForSign && child.previous == null) {
+                    if (useProxyNode && curNode == startNode && child.previous == null) {
                         signChild.sign = child.sign;
                         signChild.msg = child.msg;
                     }
@@ -110,17 +169,25 @@ public class NarySTBS implements Signature {
             curNode = curNode.parent;
         }
 
-        sk.nextForSign = sk.nextForSign.next;
         return sign;
     }
 
     public boolean vrfy(PubKey pk, Sign sign, Message msg) {
-        return _vrfy((NarySTBSPubKey) pk, (NarySTBSSign) sign, (HashMessage) msg);
+        try {
+            if (measure) {
+                timeStamp = System.nanoTime();
+            }
+            return _vrfy((NarySTBSPubKey) pk, (NarySTBSSign) sign, (HashMessage) msg);
+        } finally {
+            if (measure) {
+                measures.addVrfyTime(System.nanoTime() - timeStamp);
+            }
+        }
     }
 
-    public boolean _vrfy(NarySTBSPubKey pk, NarySTBSSign sign, HashMessage msg) {
-        Node curNode = sign.chainNodes().get(0);
-        if (!msg.value().equals(useProxyNode ? curNode.children.get(arity).msg.value() : curNode.msg.value())) {
+    private boolean _vrfy(NarySTBSPubKey pk, NarySTBSSign sign, HashMessage msg) {
+        Node curNode = sign.chainNodes.get(0);
+        if (!msg.value.equals(useProxyNode ? curNode.children.get(arity).msg.value : curNode.msg.value)) {
             return false;
         }
         sign.chainNodes.get(sign.chainNodes.size() - 1).pk = pk.headPk;
@@ -170,7 +237,7 @@ public class NarySTBS implements Signature {
 
         if (!useProxyNode) {
             // Otherwise, concat common hash with the msg hash
-            hash.concat(node.msg.value());
+            hash.concat(node.msg.value);
         }
         return hash;
     }
@@ -193,7 +260,12 @@ public class NarySTBS implements Signature {
         }
     }
 
-    public record NarySTBSSign(List<Node> chainNodes) implements Sign {}
+    public static class NarySTBSSign implements Sign {
+        public final List<Node> chainNodes;
+        public NarySTBSSign(List<Node> chainNodes) {
+            this.chainNodes = chainNodes;
+        }
+    }
 
     private static class Node {
         public Node parent;

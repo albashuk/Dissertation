@@ -65,7 +65,7 @@ public class Lamport implements Signature {
     }
 
     private LamportSign _sign(LamportSecKey sk, HashMessage msg) {
-        BitSet bits = BitSet.valueOf(msg.value().getBytes());
+        BitSet bits = BitSet.valueOf(msg.value.getBytes());
         List<Hash> signValues = new ArrayList<>();
         for (int i = 0; i < bits.length(); i++) {
             signValues.add(!bits.get(i) ? sk.values.get(i).getLeft() : sk.values.get(i).getRight());
@@ -78,7 +78,7 @@ public class Lamport implements Signature {
     }
 
     private boolean _vrfy(LamportPubKey pk, LamportSign sign, HashMessage msg) {
-        BitSet bits = BitSet.valueOf(msg.value().getBytes());
+        BitSet bits = BitSet.valueOf(msg.value.getBytes());
         for (int i = 0; i < bits.length(); i++) {
             Hash pkValue = !bits.get(i) ? pk.values.get(i).getLeft() : pk.values.get(i).getRight();
             Hash signValue = sign.values.get(i).update();
@@ -89,13 +89,29 @@ public class Lamport implements Signature {
         return true;
     }
 
-    public record LamportSecKey(List<Pair<Hash, Hash>> values) implements SecKey {}
+    public static class LamportSecKey implements SecKey {
+        public final List<Pair<Hash, Hash>> values;
+        public LamportSecKey(List<Pair<Hash, Hash>> values) {
+            this.values = values;
+        }
+    }
 
-    public record LamportPubKey(List<Pair<Hash, Hash>> values, Hash hash) implements PubKey {
+    public static class LamportPubKey implements PubKey {
+        public final List<Pair<Hash, Hash>> values;
+        public final Hash hash;
+        public LamportPubKey(List<Pair<Hash, Hash>> values, Hash hash) {
+            this.values = values;
+            this.hash = hash;
+        }
         public Hash getHash() {
             return hash;
         }
     }
 
-    public record LamportSign(List<Hash> values) implements Sign {}
+    public static class LamportSign implements Sign {
+        public final List<Hash> values;
+        public LamportSign(List<Hash> values) {
+            this.values = values;
+        }
+    }
 }

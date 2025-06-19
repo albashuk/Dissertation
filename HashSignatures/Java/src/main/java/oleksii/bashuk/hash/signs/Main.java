@@ -5,6 +5,7 @@ import oleksii.bashuk.hash.signs.hash.HashFunction.*;
 import oleksii.bashuk.hash.signs.hash.MyHashFunction;
 import oleksii.bashuk.hash.signs.hash.MyHashFunction.*;
 import oleksii.bashuk.hash.signs.measure.GWOTSMeasures;
+import oleksii.bashuk.hash.signs.measure.MTSMeasures;
 import oleksii.bashuk.hash.signs.realisation.gwots.Simulation;
 import oleksii.bashuk.hash.signs.signature.Signature.*;
 import oleksii.bashuk.hash.signs.signature.mts.NarySTBS;
@@ -153,6 +154,7 @@ public class Main {
         int seedKey = 123;
         int arity = 4;
         boolean useProxy = false;
+        boolean measure = true;
         int iterations = 24;
 
         MyHashFunction myHashFunction;
@@ -164,7 +166,7 @@ public class Main {
         }
 
         Lamport lamport = new Lamport(myHashFunction, seedKey);
-        NarySTBS narySTBS = new NarySTBS(myHashFunction, lamport, arity, useProxy);
+        NarySTBS narySTBS = new NarySTBS(myHashFunction, lamport, arity, useProxy, measure);
 
         Pair<SecKey, PubKey> key = narySTBS.gen();
         NarySTBSSecKey sk = (NarySTBSSecKey) key.getLeft();
@@ -180,7 +182,7 @@ public class Main {
             random.nextBytes(randomValue);
             msg = new HashMessage(myHashFunction.hash(randomValue));
             sign = (NarySTBSSign) narySTBS.sign(sk, msg);
-            System.out.println("Result " + (i + 1) + ": " + narySTBS.vrfy(pk, sign, msg) + " " + sign.chainNodes().size());
+            System.out.println("Result " + (i + 1) + ": " + narySTBS.vrfy(pk, sign, msg) + " " + sign.chainNodes.size());
         }
 
 //        NarySTBSSign sign = (NarySTBSSign) narySTBS.sign(sk, msg);
@@ -189,6 +191,11 @@ public class Main {
         msg = new HashMessage(myHashFunction.hash(randomValue));
 
         System.out.println("Corrupted result: " + narySTBS.vrfy(pk, sign, msg));
+
+        if (measure) {
+            narySTBS.getMeasures().saveToFile("debug_narySTBS");
+            MTSMeasures measures = MTSMeasures.loadFromFile("data/debug_narySTBS_SHA-512_4_without_proxy.txt");
+        }
     }
 
     private static void measureGWOTS() {
