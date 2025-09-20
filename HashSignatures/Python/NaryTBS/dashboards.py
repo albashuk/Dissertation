@@ -6,6 +6,12 @@ import plotly.graph_objects as go
 import numpy as np
 
 def preprocess_data(data):
+    l = 0
+    for i in range(4):
+        l = max(l, len(data[i]))
+    for i in range(4):
+        if len(data[i]) == 0:
+            data[i] = list(range(l))
     for i in range(len(data[3])):
         data[3][i] /= 1024 * 1024 # Bs to MBs
 
@@ -14,7 +20,7 @@ def read_file(path):
         data = [ast.literal_eval(line) for line in datafile]
         preprocess_data(data)
         data_time_range = list(range(len(data[0])))
-        data_size_range = list(range(9, len(data[0]), 10))
+        data_size_range = [10 * x + 9 for x in range(len(data[3]))]
         df_time = pd.DataFrame({'x': data_time_range, 'st': data[0], 'sct': data[1], 'vt': data[2]})
         df_size = pd.DataFrame({'x': data_size_range, 'ss': data[3]})
         return df_time, df_size
@@ -29,25 +35,31 @@ def load_nary_tbs_data(configs):
 
 if __name__ == "__main__":
     # data
-    configs = [{'name': '2_0_0', 'color': 'red'}, {'name': '4_0_0', 'color': 'blue'}]
+    configs = [{'name': '2_0_0', 'color': 'red'},
+               {'name': '3_0_0', 'color': 'green'},
+               {'name': '4_0_0', 'color': 'blue'},
+               {'name': '5_0_0', 'color': 'yellow'},
+               {'name': '8_0_0', 'color': 'purple'},
+               {'name': '2_0_1', 'color': 'pink'},
+               {'name': 'x_0_1', 'color': 'black'},]
     d = load_nary_tbs_data(configs)
 
     # settings
     pio.renderers.default = 'browser'
     # st, sct, vt, ss
-    mn = 'ss'
+    mn = 'st'
     title = ('<b>'
              + 'STBS та WSTBS'
              + '</b>')
     bb = 0
     lb = 0
     tb = 1000
-    rb = 100000
-    clean_data = 0
+    rb = 100000000
+    clean_data = 1
     mean_window = 10
     line_mode = 'lines'
     line_width = 3
-    show = [0, 1]
+    show = [0, 1, 2, 3, 4]
 
     bi = 1 if mn in ['ss'] else 0
     for d_ in d:

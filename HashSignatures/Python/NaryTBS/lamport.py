@@ -44,8 +44,10 @@ class Lamport(OTS):
             raise NotImplementedError
         super().__init__(hashF, hash_size, seed_key)
 
-    def gen(self) -> {SecKey, PubKey}:
-        random.seed(self._seed())
+    def gen(self, seed = None) -> {SecKey, PubKey}:
+        if seed is None:
+            seed = self._seed()
+        random.seed(seed)
         sk = self.SecKey([[self.hashF(repr(random.randint(0, 1e9)).encode()) for j in range(self.hash_size)] for i in range(2)])
         pk = [[self.hashF(sk.VALUES[i][j].digest()) for j in range(self.hash_size)] for i in range(2)]
         pk = self.PubKey(pk, self.__mtx_of_hashes_to_hash(pk))

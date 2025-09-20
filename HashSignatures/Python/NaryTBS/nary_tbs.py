@@ -26,11 +26,12 @@ class Node:
 
 class NaryTBS(MTS):
     class SecKey(MTS.SecKey):
-        def __init__(self, head: Node):
+        def __init__(self, head: Node, seed_key: int):
             self.head = head
             self.last = head
             self.next_for_sign = head
-            self.size = 0
+            self.signed = 0
+            self.seed_key = seed_key
 
     class PubKey(MTS.PubKey):
         def __init__(self, head_pk: OTS.PubKey):
@@ -43,18 +44,19 @@ class NaryTBS(MTS):
         def __init__(self, chaine_nodes: List[Node]):
             self.chaine_nodes = chaine_nodes
 
-    def __init__(self, hashF: HashFunction, hash_size: int, ots: OTS, arity: int, use_proxy_node: bool, measuring: bool):
+    def __init__(self, hashF: HashFunction, hash_size: int, ots: OTS, arity: int, use_proxy_node: bool, full_tree: bool, measuring: bool):
         if not issubclass(self.__class__, MTS):
             raise NotImplementedError
         super().__init__(hashF, hash_size, ots)
         self.arity = arity
         self.use_proxy_node = use_proxy_node
+        self.full_tree = full_tree
         self.measuring = measuring
         self.measures = MTSMeasures(hashF.name, arity, use_proxy_node)
 
-    def gen(self) -> {SecKey, PubKey}:
-        ots_sk, ots_pk = self.ots.gen()
-        sk = self.SecKey(Node(None, ots_sk, None))
+    def gen(self, seed = None) -> {SecKey, PubKey}:
+        ots_sk, ots_pk = self.ots.gen(seed)
+        sk = self.SecKey(Node(None, ots_sk, None), seed)
         pk = self.PubKey(ots_pk)
         return sk, pk
 
@@ -62,19 +64,22 @@ class NaryTBS(MTS):
         if self.measuring:
             timeStamp = time()
 
-        sign_node = self.__sign_by_next_node(sk, msg)
-        sk.next_for_sign = sk.next_for_sign.next
-        sk.size += 1
+        if self.full_tree:
+            sign = self.__recreate_signature_in_full_tree(sk, msg)
+        else:
+            sign_node = self.__sign_by_next_node(sk, msg)
+            sk.next_for_sign = sk.next_for_sign.next
 
-        if self.measuring:
-            self.measures.sign_time.append(time() - timeStamp)
-            timeStamp = time()
+            if self.measuring:
+                self.measures.sign_time.append(time() - timeStamp)
+                timeStamp = time()
 
-        sign = self.__create_signature_chain(sk, sign_node)
+            sign = self.__create_signature_chain(sk, sign_node)
+        sk.signed += 1
 
         if self.measuring:
             self.measures.sign_creation_time.append(time() - timeStamp)
-            if sk.size % 10 == 0:
+            if sk.signed % 10 == 0:
                 self.measures.sign_size.append(asizeof.asizeof(sign))
 
         return sign
@@ -157,6 +162,41 @@ class NaryTBS(MTS):
             cur_node = cur_node.parent
         return sign
 
+    def __recreate_signature_in_full_tree(self, sk: SecKey, msg: str) -> Sign:
+        base_seed = sk.seed_key
+        msg_ind = int(self.hashF(msg.encode()).hexdigest(), 16)
+        highest_ind = (1 << self.hash_size) - 1
+
+        sign = self.Sign([])
+        cur_ots_sk, ots_pk = self.ots.gen(base_seed)
+        sign_node = Node(None, None, ots_pk)
+        base_seed = int(self.hashF(str(base_seed).encode()).hexdigest(), 16)
+
+        while highest_ind > 0:
+            child_ind = msg_ind % self.arity
+            for i in range(self.arity):
+                ots_sk, ots_pk = self.ots.gen(base_seed + child_ind)
+                sign_node.children.append(Node(sign_node, None, ots_pk))
+                if i == child_ind:
+                    next_ots_sk = ots_sk
+            _hash = self.__prepare_hash_for_sign(sign_node)
+            sign_node.sign = self.ots.sign(cur_ots_sk, _hash.hexdigest())
+            sign.chaine_nodes.append(sign_node)
+
+            sign_node = sign_node.children[child_ind]
+            cur_ots_sk = next_ots_sk
+            base_seed = int(self.hashF(str(base_seed + child_ind).encode()).hexdigest(), 16)
+            msg_ind //= self.arity
+            highest_ind //= self.arity
+
+        sign_node.msg = msg
+        _hash = self.__prepare_hash_for_sign(sign_node)
+        sign_node.sign = self.ots.sign(cur_ots_sk, _hash.hexdigest())
+        sign.chaine_nodes.append(sign_node)
+        sign.chaine_nodes.reverse()
+        return sign
+
+
     def vrfy(self, pk: PubKey, sign: Sign, msg: str) -> bool:
         if self.measuring:
             timeStamp = time()
@@ -172,14 +212,14 @@ class NaryTBS(MTS):
                 sign.chaine_nodes[-1].pk = None
                 return False
 
-        last_node = cur_node.children[0]
+        last_node = cur_node
         while cur_node is not None:
             last_node_is_child = False
             for child in cur_node.children:
                 if child == last_node:
                     last_node_is_child = True
                     break
-            if not last_node_is_child:
+            if last_node != cur_node and not last_node_is_child:
                 sign.chaine_nodes[-1].pk = None
                 return False
 
@@ -217,23 +257,24 @@ if __name__ == "__main__":
     from lamport import Lamport
 
     seed_key = 123
-    iter = 100000
+    iter = 10000
     testing = False
     iterating = True
     measuring = True
     arity = 3
     use_proxy_node = 0
-    full_tree = 0
-    use_proxy_node_bool = True if use_proxy_node != 0 else False
-    full_tree_bool = True if full_tree != 0 else False
+    full_tree = 1
+    use_proxy_node_bool = True if full_tree == 0 and use_proxy_node == 1 else False
+    full_tree_bool = True if full_tree == 1 else False
 
     sha256('123'.encode('utf-8')).copy()
     hashF = HashFunction(sha256)
     lamport = Lamport(hashF, 256, seed_key)
-    nary_tbs = NaryTBS(hashF, 256, lamport, arity, use_proxy_node_bool, measuring)
-    sk, pk = nary_tbs.gen()
 
     if testing:
+        nary_tbs = NaryTBS(hashF, 256, lamport, arity, use_proxy_node_bool, full_tree_bool, measuring)
+        sk, pk = nary_tbs.gen(seed_key)
+
         msg1 = "foo1"
         msg2 = "foo2"
         msg3 = "foo3"
@@ -246,37 +287,80 @@ if __name__ == "__main__":
         print(nary_tbs.vrfy(pk, sign2, msg1), nary_tbs.vrfy(pk, sign2, msg2), nary_tbs.vrfy(pk, sign2, msg3))
         print(nary_tbs.vrfy(pk, sign3, msg1), nary_tbs.vrfy(pk, sign3, msg2), nary_tbs.vrfy(pk, sign3, msg3))
 
+        # for i in range(2, 11):
+        #     arr = []
+        #     for j in range(i, 11):
+        #         c2 = (j + 2) / (i + 2)
+        #         arr.append((i ** c2) / j)
+        #     print(arr)
+
     if iterating:
         try:
-            flag = False
-            for i in range(iter):
-                t = time()
-                with open("interrupt.txt", 'r') as datafile:
-                    for line in datafile:
-                        if len(line) > 0:
-                            flag = True
-                            break
-                if flag:
-                    print("\r", i)
-                    break
+            if not full_tree_bool:
+                nary_tbs = NaryTBS(hashF, 256, lamport, arity, use_proxy_node_bool, full_tree_bool, measuring)
+                sk, pk = nary_tbs.gen(seed_key)
+                flag = False
+                p = iter // 1000
+                for i in range(iter):
+                    t = time()
+                    with open("interrupt.txt", 'r') as datafile:
+                        for line in datafile:
+                            if len(line) > 0:
+                                flag = True
+                                break
+                    if flag:
+                        print("\r", i)
+                        break
 
-                msg = str(i)
-                sign = nary_tbs.sign(sk, msg)
-                if time() - t > 1:
-                    print("\r", i)
-                if not nary_tbs.vrfy(pk, sign, msg):
-                    print("\r", i)
-                if i % 100 == 0:
-                    print("\r", 100*i/iter, "%", sep="", end="")
+                    msg = str(i)
+                    sign = nary_tbs.sign(sk, msg)
+                    if time() - t > 1:
+                        print("\r", i)
+                    if not nary_tbs.vrfy(pk, sign, msg):
+                        print("\r", i)
+                    if i % p == 0:
+                        print("\r", ((100000*i//iter) // 100)/10, "%", sep="", end="")
+            else:
+                measures = MTSMeasures(hashF.name, 'x', use_proxy_node)
+                arities = iter // 100
+                flag = False
+                for arity in range(2, 2 + arities):
+                    nary_tbs = NaryTBS(hashF, 256, lamport, arity, use_proxy_node_bool, full_tree_bool, measuring)
+                    sk, pk = nary_tbs.gen(seed_key)
+                    for i in range(100):
+                        t = time()
+                        with open("interrupt.txt", 'r') as datafile:
+                            for line in datafile:
+                                if len(line) > 0:
+                                    flag = True
+                                    break
+                        if flag:
+                            print("\r", i)
+                            break
+
+                        msg = str(i)
+                        sign = nary_tbs.sign(sk, msg)
+                        if time() - t > 1:
+                            print("\r", i)
+                        if not nary_tbs.vrfy(pk, sign, msg):
+                            print("\r", i)
+                        print("\r", arity, " - ", i, sep="", end="")
+                    measures.sign_creation_time.append(sum(nary_tbs.measures.sign_creation_time) / len(nary_tbs.measures.sign_creation_time))
+                    measures.vrfy_time.append(sum(nary_tbs.measures.vrfy_time) / len(nary_tbs.measures.vrfy_time))
+                    measures.sign_size.append(sum(nary_tbs.measures.sign_size) / len(nary_tbs.measures.sign_size))
         finally:
             if measuring:
+                if full_tree_bool:
+                    arity = 'x'
+                else:
+                    measures = nary_tbs.measures
                 path = 'data/' + nary_tbs.__class__.__name__ + '/' + str(arity) + '_' + str(use_proxy_node) + '_' + str(full_tree) + '/'
                 filename = datetime.now().strftime("%y-%m-%d-%H-%M-%S") + '.txt'
                 pathlib.Path(path).mkdir(parents=True, exist_ok=True)
                 with open(path + filename, 'w') as file:
-                    file.write(str(nary_tbs.measures.sign_time) + "\n")
-                    file.write(str(nary_tbs.measures.sign_creation_time) + "\n")
-                    file.write(str(nary_tbs.measures.vrfy_time) + "\n")
-                    file.write(str(nary_tbs.measures.sign_size) + "\n")
+                    file.write(str(measures.sign_time) + "\n")
+                    file.write(str(measures.sign_creation_time) + "\n")
+                    file.write(str(measures.vrfy_time) + "\n")
+                    file.write(str(measures.sign_size) + "\n")
 
 

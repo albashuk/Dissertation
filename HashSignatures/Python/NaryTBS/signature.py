@@ -39,7 +39,7 @@ class Signature(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def gen(self) -> {SecKey, PubKey}:
+    def gen(self, seed) -> {SecKey, PubKey}:
         raise NotImplementedError
 
     @abc.abstractmethod
